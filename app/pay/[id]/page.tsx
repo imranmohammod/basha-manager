@@ -1,127 +1,580 @@
 "use client";
+
 import { useEffect, useState } from "react";
-import { supabase } from "../../../lib/supabase";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { supabase } from "../../../lib/supabase";
+
+type PaymentMethod = "personal" | "gateway" | "cash";
 
 type Invoice = {
   id: string;
   month: string;
+  rent_amount: number;
+  utility_amount: number;
   total_amount: number;
   status: string;
+  bkash_trxid?: string | null;
+  reference_code?: string | null;
+  payment_method?: string | null;
+
   leases?: {
-    units?: { unit_name: string; properties?: { name: string } | null } | null;
-    tenants?: { name: string; phone?: string } | null;
+    monthly_rent?: number;
+    utility_fixed?: number;
+
+    units?: {
+      unit_name: string;
+
+      properties?: {
+        name: string;
+      } | null;
+    } | null;
+
+    tenants?: {
+      name: string;
+      phone?: string;
+    } | null;
   } | null;
 };
 
 export default function PayPage() {
-  const { id } = useParams() as { id: string };
+  const params = useParams();
+
+  const id = typeof params.id === "string" ? params.id : "";
+
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [method, setMethod] = useState<"personal" | "gateway" | "cash">("personal");
+
+  const [method, setMethod] = useState<PaymentMethod>("personal");
+
   const [trxId, setTrxId] = useState("");
+
   const [loading, setLoading] = useState(true);
+
   const [submitting, setSubmitting] = useState(false);
+
   const [done, setDone] = useState(false);
 
+  const [errorMessage, setErrorMessage] = useState("");
+
   useEffect(() => {
-    const fetch = async () => {
-      const { data } = await supabase.from("invoices").select(`id, month, total_amount, status, leases(units(unit_name, properties(name)), tenants(name, phone))`).eq("id", id).single();
-      setInvoice(data as any);
+    async function fetchInvoice() {
+      if (!id) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setErrorMessage("");
+
+      const { data, error } = await supabase
+        .from("invoices")
+        .select(
+          `
+            id,
+            month,
+            rent_amount,
+            utility_amount,
+            total_amount,
+            status,
+            bkash_trxid,
+            reference_code,
+            payment_method,
+            leases (
+              monthly_rent,
+              utility_fixed,
+              units (
+                unit_name,
+                properties (
+                  name
+                )
+              ),
+              tenants (
+                name,
+                phone
+              )
+            )
+          `,
+        )
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error("Invoice fetch error:", error);
+
+        setInvoice(null);
+        setErrorMessage("Invoice তথ্য লোড করা যায়নি।");
+
+        setLoading(false);
+        return;
+      }
+
+      const invoiceData = data as Invoice;
+
+      setInvoice(invoiceData);
+
+      if (invoiceData.bkash_trxid) {
+        setTrxId(invoiceData.bkash_trxid);
+      }
+
+      if (
+        invoiceData.payment_method === "gateway" ||
+        invoiceData.payment_method === "cash" ||
+        invoiceData.payment_method === "personal"
+      ) {
+        setMethod(invoiceData.payment_method);
+      }
+
       setLoading(false);
-    };
-    if (id) fetch();
+    }
+
+    fetchInvoice();
   }, [id]);
 
-  const handleConfirm = async () => {
-    if (!trxId || trxId.length < 6) {
-      alert("সঠিক TrxID দিন");
+  async function handleConfirm() {
+    if (!invoice) {
       return;
     }
+
+    if (method !== "personal") {
+      setErrorMessage("এই payment method এখনো চালু করা হয়নি।");
+      return;
+    }
+
+    const cleanedTrxId = trxId.trim().toUpperCase();
+
+    if (!cleanedTrxId || cleanedTrxId.length < 6) {
+      setErrorMessage("সঠিক bKash TrxID দিন।");
+      return;
+    }
+
+    if (invoice.status === "paid") {
+      setErrorMessage("এই invoice ইতিমধ্যে paid হয়েছে।");
+      return;
+    }
+
     setSubmitting(true);
-    // রেফারেন্স অনুযায়ী: Tenant TrxID দিবে, মালিক পরে Confirm করবে
-    const { error } = await supabase.from("invoices").update({ bkash_trxid: trxId, status: "pending" }).eq("id", id);
-    if (!error) setDone(true);
+    setErrorMessage("");
+
+    /*
+      Existing reference থাকলে সেটাই ব্যবহার হবে।
+      না থাকলে invoice ID থেকে তৈরি হবে।
+    */
+    const referenceCode =
+      invoice.reference_code ??
+      `INV-${invoice.id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+
+    const { error } = await supabase
+      .from("invoices")
+      .update({
+        bkash_trxid: cleanedTrxId,
+        reference_code: referenceCode,
+        payment_method: "personal",
+        status: "pending",
+      })
+      .eq("id", invoice.id);
+
+    if (error) {
+      console.error("Payment submission error:", error);
+
+      setErrorMessage(
+        "Payment information জমা দেওয়া যায়নি। আবার চেষ্টা করুন।",
+      );
+
+      setSubmitting(false);
+      return;
+    }
+
+    setInvoice((currentInvoice) =>
+      currentInvoice
+        ? {
+            ...currentInvoice,
+            bkash_trxid: cleanedTrxId,
+            reference_code: referenceCode,
+            payment_method: "personal",
+            status: "pending",
+          }
+        : currentInvoice,
+    );
+
+    setDone(true);
     setSubmitting(false);
-  };
+  }
 
-  if (loading) return <div className="min-h-screen grid place-items-center bg-[#f8f7f5]">Loading...</div>;
-  if (!invoice) return <div className="min-h-screen grid place-items-center">Invoice পাওয়া যায়নি</div>;
-
-  if (done) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-[#f8f7f5] p-4 grid place-items-center">
-        <div className="w-full max-w- rounded- bg-white border p-8 text-center shadow-sm">
-          <div className="mx-auto w-12 h-12 rounded-full bg-green-50 grid place-items-center text-xl">✓</div>
-          <h2 className="mt-4 font-bold">আপনার পেমেন্ট যাচাইয়ের জন্য পাঠানো হয়েছে</h2>
-          <p className="mt-2 text-sm text-zinc-500">যাচাই হতে সাধারণত ১-২ ঘণ্টা লাগে। মালিক Confirm করলেই রশিদ পাবেন।</p>
-          <a href="/" className="mt-6 inline-block text-sm text-zinc-600">পেমেন্ট পেজে ফিরে যান</a>
+      <div className="grid min-h-screen place-items-center bg-[#f8f7f5]">
+        <p className="text-sm text-zinc-500">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!invoice) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#f8f7f5] p-4">
+        <div className="w-full max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-50 text-xl text-red-600">
+            !
+          </div>
+
+          <h2 className="mt-4 font-bold text-zinc-900">
+            Invoice পাওয়া যায়নি
+          </h2>
+
+          <p className="mt-2 text-sm text-zinc-500">
+            {errorMessage || "এই invoice-এর তথ্য পাওয়া যাচ্ছে না।"}
+          </p>
+
+          <Link
+            href="/"
+            className="mt-6 inline-block rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white"
+          >
+            ড্যাশবোর্ডে ফিরে যান
+          </Link>
         </div>
       </div>
     );
   }
 
+  /*
+    Invoice already paid
+  */
+  if (invoice.status === "paid") {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#f8f7f5] p-4">
+        <div className="w-full max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-green-50 text-xl text-green-600">
+            ✓
+          </div>
+
+          <h2 className="mt-4 font-bold text-zinc-900">
+            Payment সম্পন্ন হয়েছে
+          </h2>
+
+          <p className="mt-2 text-sm text-zinc-500">
+            এই invoice-এর payment ইতিমধ্যে Confirm করা হয়েছে।
+          </p>
+
+          <div className="mt-5 rounded-xl bg-zinc-50 p-4 text-left">
+            <div className="flex justify-between gap-4">
+              <span className="text-sm text-zinc-500">Reference</span>
+
+              <span className="font-mono text-sm font-semibold text-zinc-900">
+                {invoice.reference_code ?? invoice.id.slice(0, 8).toUpperCase()}
+              </span>
+            </div>
+
+            <div className="mt-2 flex justify-between gap-4">
+              <span className="text-sm text-zinc-500">Amount</span>
+
+              <span className="font-bold text-zinc-900">
+                {Number(invoice.total_amount).toLocaleString("bn-BD")} ৳
+              </span>
+            </div>
+
+            {invoice.bkash_trxid && (
+              <div className="mt-2 flex justify-between gap-4">
+                <span className="text-sm text-zinc-500">TrxID</span>
+
+                <span className="font-mono text-sm font-semibold text-zinc-900">
+                  {invoice.bkash_trxid}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <Link
+            href="/"
+            className="mt-6 inline-block rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white"
+          >
+            ড্যাশবোর্ডে ফিরে যান
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+    Payment submitted
+  */
+  if (done) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#f8f7f5] p-4">
+        <div className="w-full max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-green-50 text-xl text-green-600">
+            ✓
+          </div>
+
+          <h2 className="mt-4 font-bold text-zinc-900">
+            Payment verification-এর জন্য পাঠানো হয়েছে
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-zinc-500">
+            আপনার TrxID মালিকের কাছে পাঠানো হয়েছে। মালিক payment যাচাই করে
+            Confirm করলে invoice paid হবে।
+          </p>
+
+          <div className="mt-5 rounded-xl bg-zinc-50 p-4 text-left">
+            <div className="flex justify-between gap-4">
+              <span className="text-sm text-zinc-500">Reference</span>
+
+              <span className="font-mono text-sm font-semibold text-zinc-900">
+                {invoice.reference_code ?? invoice.id.slice(0, 8).toUpperCase()}
+              </span>
+            </div>
+
+            <div className="mt-2 flex justify-between gap-4">
+              <span className="text-sm text-zinc-500">Amount</span>
+
+              <span className="font-bold text-zinc-900">
+                {Number(invoice.total_amount).toLocaleString("bn-BD")} ৳
+              </span>
+            </div>
+
+            <div className="mt-2 flex justify-between gap-4">
+              <span className="text-sm text-zinc-500">TrxID</span>
+
+              <span className="font-mono text-sm font-semibold text-zinc-900">
+                {trxId}
+              </span>
+            </div>
+          </div>
+
+          <Link
+            href="/"
+            className="mt-6 inline-block text-sm font-medium text-zinc-600 underline underline-offset-4"
+          >
+            ড্যাশবোর্ডে ফিরে যান
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const propertyName = invoice.leases?.units?.properties?.name ?? "Basha";
+
+  const unitName = invoice.leases?.units?.unit_name ?? "Unknown Unit";
+
+  const tenantName = invoice.leases?.tenants?.name ?? "Unknown Tenant";
+
+  const referenceCode =
+    invoice.reference_code ??
+    `INV-${invoice.id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+
   return (
     <div className="min-h-screen bg-[#f8f7f5]">
-      <div className="max-w- mx-auto p-3">
+      <div className="mx-auto max-w-md p-3 pb-8">
         {/* Header */}
-        <div className="rounded- bg-zinc-900 text-white p-5">
-          <p className="text- tracking-widest uppercase opacity-60">নিরাপদ ভাড়া পেমেন্ট</p>
-          <h1 className="mt-1 text- font-bold">{invoice.leases?.units?.properties?.name?? "Basha"} - {invoice.leases?.units?.unit_name}</h1>
-          <p className="text-sm opacity-70">{invoice.month} • {invoice.leases?.tenants?.name}</p>
-          <div className="mt-4 rounded-xl bg-white/10 p-3 flex justify-between">
-            <span className="text-xs opacity-70">মোট দিতে হবে</span>
-            <span className="font-bold">{Number(invoice.total_amount).toLocaleString("bn-BD")} ৳</span>
+        <div className="rounded-2xl bg-zinc-900 p-5 text-white">
+          <p className="text-xs font-medium uppercase tracking-widest text-white/60">
+            নিরাপদ ভাড়া পেমেন্ট
+          </p>
+
+          <h1 className="mt-2 text-xl font-bold">
+            {propertyName} - {unitName}
+          </h1>
+
+          <p className="mt-1 text-sm text-white/70">
+            {invoice.month} • {tenantName}
+          </p>
+
+          <div className="mt-4 rounded-xl bg-white/10 p-3">
+            <div className="flex justify-between">
+              <span className="text-xs text-white/70">Reference</span>
+
+              <span className="font-mono text-sm font-bold">
+                {referenceCode}
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-white/70">মোট দিতে হবে</span>
+
+              <span className="text-lg font-bold">
+                {Number(invoice.total_amount).toLocaleString("bn-BD")} ৳
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Method Tabs */}
+        {/* Payment methods */}
         <div className="mt-4 grid grid-cols-3 gap-2">
-          <button onClick={() => setMethod("personal")} className={`h-12 rounded-full text- font-bold border ${method==="personal"?"bg-zinc-900 text-white":"bg-white"}`}>bKash Personal</button>
-          <button onClick={() => setMethod("gateway")} className={`h-12 rounded-full text- font-bold border ${method==="gateway"?"bg-zinc-900 text-white":"bg-white"}`}>Gateway</button>
-          <button onClick={() => setMethod("cash")} className={`h-12 rounded-full text- font-bold border ${method==="cash"?"bg-zinc-900 text-white":"bg-white"}`}>Cash</button>
+          <button
+            type="button"
+            onClick={() => setMethod("personal")}
+            className={`h-12 rounded-full border text-xs font-bold ${
+              method === "personal"
+                ? "border-zinc-900 bg-zinc-900 text-white"
+                : "border-zinc-200 bg-white text-zinc-700"
+            }`}
+          >
+            bKash Personal
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMethod("gateway")}
+            className={`h-12 rounded-full border text-xs font-bold ${
+              method === "gateway"
+                ? "border-zinc-900 bg-zinc-900 text-white"
+                : "border-zinc-200 bg-white text-zinc-700"
+            }`}
+          >
+            Gateway
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMethod("cash")}
+            className={`h-12 rounded-full border text-xs font-bold ${
+              method === "cash"
+                ? "border-zinc-900 bg-zinc-900 text-white"
+                : "border-zinc-200 bg-white text-zinc-700"
+            }`}
+          >
+            Cash
+          </button>
         </div>
 
-        {/* Personal Flow - রেফারেন্স অনুযায়ী */}
-        {method==="personal" && (
-          <div className="mt-4 rounded- bg-white border shadow-sm p-5 space-y-4">
-            <h3 className="font-bold text-">bKash এ কিভাবে পাঠাবেন</h3>
-            <div className="text- leading-6 space-y-2 text-zinc-600">
-              <p>১. আপনার bKash অ্যাপে লগইন করুন</p>
-              <p>২. <b>Send Money</b> করুন <span className="font-mono bg-yellow-50 px-2 py-1 rounded">017XX XXX XXX</span> নাম্বারে - ভুল নাম্বারে পাঠাবেন না</p>
-              <p>৩. পুরো অ্যামাউন্ট একবারে পাঠান</p>
-              <p>৪. রেফারেন্স এ লিখুন: <span className="font-mono font-bold text-zinc-900">{invoice.id.slice(0,8).toUpperCase()}</span> - রেফারেন্স ভুল হলে ভেরিফিকেশন দেরি হবে</p>
-            </div>
+        {/* Error */}
+        {errorMessage && (
+          <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+            {errorMessage}
+          </div>
+        )}
+
+        {/* Personal */}
+        {method === "personal" && (
+          <div className="mt-4 space-y-4 rounded-2xl border bg-white p-5 shadow-sm">
             <div>
-              <label className="text- font-semibold">TrxID নিচে দিন</label>
-              <input value={trxId} onChange={e=>setTrxId(e.target.value.toUpperCase())} placeholder="যেমন: 9K2L3M4N5P" className="mt-2 w-full h-12 rounded-xl border px-4 font-mono uppercase" />
-              <p className="mt-1 text- text-zinc-500">TrxID টি bKash App এর History তে পাবেন</p>
+              <h3 className="font-bold text-zinc-900">
+                bKash এ কিভাবে পাঠাবেন
+              </h3>
+
+              <p className="mt-1 text-xs text-zinc-500">
+                Personal Send Money ব্যবহার করে payment করুন।
+              </p>
             </div>
-            <button disabled={submitting} onClick={handleConfirm} className="w-full h- rounded- bg-[#10b981] text-white font-bold disabled:opacity-50">
-              {submitting?"পাঠানো হচ্ছে...":"পেমেন্ট কনফার্ম করেছি"}
+
+            <div className="space-y-3 text-sm leading-6 text-zinc-600">
+              <p>
+                <b>১.</b> আপনার bKash অ্যাপে লগইন করুন।
+              </p>
+
+              <p>
+                <b>২.</b> <strong>Send Money</strong> করুন মালিকের bKash নম্বরে।
+              </p>
+
+              <div className="rounded-xl bg-yellow-50 p-3 text-center">
+                <span className="font-mono font-bold text-zinc-900">
+                  017XX XXX XXX
+                </span>
+              </div>
+
+              <p className="text-xs text-red-600">
+                টাকা পাঠানোর আগে নম্বরটি মালিকের কাছ থেকে নিশ্চিত করুন।
+              </p>
+
+              <p>
+                <b>৩.</b> পুরো invoice amount একবারে পাঠান।
+              </p>
+
+              <p>
+                <b>৪.</b> bKash Reference-এ লিখুন:
+              </p>
+
+              <div className="rounded-xl bg-zinc-50 p-3 text-center">
+                <span className="font-mono font-bold text-zinc-900">
+                  {referenceCode}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="trxId"
+                className="text-sm font-semibold text-zinc-900"
+              >
+                TrxID দিন
+              </label>
+
+              <input
+                id="trxId"
+                type="text"
+                value={trxId}
+                onChange={(event) => setTrxId(event.target.value.toUpperCase())}
+                placeholder="যেমন: 9K2L3M4N5P"
+                autoComplete="off"
+                spellCheck={false}
+                className="mt-2 h-12 w-full rounded-xl border border-zinc-200 px-4 font-mono text-sm uppercase outline-none focus:border-zinc-900"
+              />
+
+              <p className="mt-1 text-xs text-zinc-500">
+                TrxID bKash App-এর Transaction History-তে পাবেন।
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleConfirm}
+              className="h-12 w-full rounded-xl bg-emerald-500 font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? "পাঠানো হচ্ছে..." : "পেমেন্ট কনফার্ম করেছি"}
             </button>
-            <p className="text-center text- text-zinc-500">এন্ড-টু-এন্ড এনক্রিপ্টেড • মালিকের কাছে সরাসরি যাবে</p>
+
+            <p className="text-center text-xs leading-5 text-zinc-500">
+              TrxID জমা দেওয়ার পর মালিক payment যাচাই করে Confirm করবেন।
+            </p>
           </div>
         )}
 
-        {method==="gateway" && (
-          <div className="mt-4 rounded- bg-white border p-8 text-center">
-            <h4 className="font-bold text-sm">Auto Verification শীঘ্রই আসছে</h4>
-            <p className="mt-2 text- text-zinc-500">bKash Payment Gateway ইন্টিগ্রেশন চলছে। আপাতত Personal Send Money ব্যবহার করুন।</p>
-            <button onClick={()=>setMethod("personal")} className="mt-5 h-10 px-5 rounded-full bg-zinc-900 text-white text-">Personal অপশনে যান</button>
+        {/* Gateway */}
+        {method === "gateway" && (
+          <div className="mt-4 rounded-2xl border bg-white p-8 text-center shadow-sm">
+            <h4 className="font-bold text-zinc-900">
+              Auto Verification শীঘ্রই আসছে
+            </h4>
+
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              bKash Payment Gateway এখনো চালু করা হয়নি। আপাতত Personal Send
+              Money ব্যবহার করুন।
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setMethod("personal")}
+              className="mt-5 h-10 rounded-full bg-zinc-900 px-5 text-sm font-medium text-white"
+            >
+              Personal অপশনে যান
+            </button>
           </div>
         )}
 
-        {method==="cash" && (
-          <div className="mt-4 rounded- bg-white border p-5">
-            <h3 className="font-bold text-sm">Cash Payment</h3>
-            <p className="mt-3 text- text-zinc-600">• মালিকের সাথে যোগাযোগ করে সরাসরি টাকা দিন</p>
-            <p className="text- text-zinc-600">• টাকা দেয়ার সময় এই Invoice ID টি দেখান: <span className="font-mono font-bold text-zinc-900">{invoice.id.slice(0,8)}</span></p>
-            <p className="text- text-zinc-600">• মালিক Basha Manager এ পেমেন্ট Confirm করবেন</p>
+        {/* Cash */}
+        {method === "cash" && (
+          <div className="mt-4 rounded-2xl border bg-white p-5 shadow-sm">
+            <h3 className="font-bold text-zinc-900">Cash Payment</h3>
+
+            <div className="mt-4 space-y-3 text-sm leading-6 text-zinc-600">
+              <p>• মালিকের সাথে যোগাযোগ করে সরাসরি টাকা দিন।</p>
+
+              <p>• টাকা দেওয়ার সময় Reference দেখান:</p>
+
+              <div className="rounded-xl bg-zinc-50 p-3 text-center">
+                <span className="font-mono font-bold text-zinc-900">
+                  {referenceCode}
+                </span>
+              </div>
+
+              <p>• মালিক Basha Manager থেকে payment Confirm করবেন।</p>
+            </div>
           </div>
         )}
 
-        <div className="mt-4 rounded- bg-[#f0fdf4] border border-emerald-100 p-3 text-[11.5px] text-emerald-800">
-          আপনার তথ্য নিরাপদ। এই পেমেন্ট Basha Manager দ্বারা সুরক্ষিত এবং সরাসরি মালিকের কাছে যাবে।
+        {/* Security note */}
+        <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">
+          Payment information শুধুমাত্র payment verification-এর জন্য ব্যবহার করা
+          হবে।
         </div>
       </div>
     </div>
