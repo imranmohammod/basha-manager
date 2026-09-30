@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -17,6 +16,7 @@ type Invoice = {
   total_amount: number;
   status: "pending" | "paid";
   created_at: string;
+  paid_at?: string | null;
 
   reference_code?: string | null;
   bkash_trxid?: string | null;
@@ -74,9 +74,7 @@ export default function Home() {
 
         if (invoice.status === "pending") {
           due += amount;
-        }
-
-        if (invoice.status === "paid") {
+        } else if (invoice.status === "paid") {
           paid += amount;
         }
       });
@@ -105,6 +103,7 @@ export default function Home() {
               total_amount,
               status,
               created_at,
+              paid_at,
               reference_code,
               bkash_trxid,
               payment_method,
@@ -132,6 +131,7 @@ export default function Home() {
         );
 
         setInvoices([]);
+
         setStats({
           total: 0,
           due: 0,
@@ -192,14 +192,16 @@ export default function Home() {
     setUpdatingId(id);
     setErrorMessage("");
 
+    const paidAt =
+      new Date().toISOString();
+
     const { error } =
       await supabase
         .from("invoices")
         .update({
           status: "paid",
           bkash_trxid: cleanedTrx,
-          paid_at:
-            new Date().toISOString(),
+          paid_at: paidAt,
         })
         .eq("id", id);
 
@@ -227,6 +229,7 @@ export default function Home() {
                   status: "paid" as const,
                   bkash_trxid:
                     cleanedTrx,
+                  paid_at: paidAt,
                 }
               : currentInvoice
         );
@@ -278,7 +281,6 @@ export default function Home() {
 
         {/* Invoice list */}
         <div className="space-y-3">
-
           {loading ? (
             <div className="rounded-xl bg-white p-6 text-center shadow">
               <p className="text-gray-500">
@@ -297,40 +299,30 @@ export default function Home() {
                 key={invoice.id}
                 id={invoice.id}
                 month={invoice.month}
-                total_amount={
-                  invoice.total_amount
-                }
+                total_amount={invoice.total_amount}
                 status={invoice.status}
-
                 reference_code={
                   invoice.reference_code
                 }
-
                 bkash_trxid={
                   invoice.bkash_trxid
                 }
-
                 tenantName={
                   invoice.leases?.tenants?.name
                 }
-
                 unitName={
                   invoice.leases?.units?.unit_name
                 }
-
                 propertyName={
                   invoice.leases?.units?.properties?.name
                 }
-
                 onPay={markAsPaid}
-
                 isPaying={
                   updatingId === invoice.id
                 }
               />
             ))
           )}
-
         </div>
       </div>
     </main>
