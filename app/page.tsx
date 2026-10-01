@@ -14,9 +14,14 @@ type Invoice = {
   id: string;
   month: string;
   total_amount: number;
-  status: "pending" | "paid";
+  status: "pending" | "verification" | "paid";
   created_at: string;
+
   paid_at?: string | null;
+  submitted_at?: string | null;
+  verified_at?: string | null;
+  verified_by?: string | null;
+  rejection_reason?: string | null;
 
   reference_code?: string | null;
   bkash_trxid?: string | null;
@@ -41,6 +46,7 @@ type Stats = {
   total: number;
   due: number;
   paid: number;
+  verification: number;
 };
 
 export default function Home() {
@@ -52,12 +58,13 @@ export default function Home() {
       total: 0,
       due: 0,
       paid: 0,
+      verification: 0,
     });
 
   const [loading, setLoading] =
     useState(true);
 
-  const [updatingId, setUpdatingId] =
+  const [processingId, setProcessingId] =
     useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] =
@@ -67,6 +74,7 @@ export default function Home() {
     (data: Invoice[]) => {
       let due = 0;
       let paid = 0;
+      let verification = 0;
 
       data.forEach((invoice) => {
         const amount =
@@ -74,7 +82,13 @@ export default function Home() {
 
         if (invoice.status === "pending") {
           due += amount;
-        } else if (invoice.status === "paid") {
+        } else if (
+          invoice.status === "verification"
+        ) {
+          verification += 1;
+        } else if (
+          invoice.status === "paid"
+        ) {
           paid += amount;
         }
       });
@@ -83,6 +97,7 @@ export default function Home() {
         total: due + paid,
         due,
         paid,
+        verification,
       });
     },
     []
@@ -104,6 +119,10 @@ export default function Home() {
               status,
               created_at,
               paid_at,
+              submitted_at,
+              verified_at,
+              verified_by,
+              rejection_reason,
               reference_code,
               bkash_trxid,
               payment_method,
@@ -136,6 +155,7 @@ export default function Home() {
           total: 0,
           due: 0,
           paid: 0,
+          verification: 0,
         });
 
         setErrorMessage(
@@ -160,7 +180,11 @@ export default function Home() {
     fetchInvoices();
   }, [fetchInvoices]);
 
-  const markAsPaid = async (
+  // =========================
+  // APPROVE PAYMENT
+  // =========================
+
+  const approvePayment = async (
     id: string
   ) => {
     const invoice =
@@ -172,27 +196,22 @@ export default function Home() {
       return;
     }
 
-    if (invoice.status === "paid") {
+    if (invoice.status !== "verification") {
       return;
     }
 
-    const trx =
-      prompt("bKash TrxID লিখো:");
+    const confirmed = window.confirm(
+      "এই payment verify করে Paid করতে চান?"
+    );
 
-    const cleanedTrx =
-      trx?.trim().toUpperCase();
-
-    if (
-      !cleanedTrx ||
-      cleanedTrx.length < 6
-    ) {
+    if (!confirmed) {
       return;
     }
 
-    setUpdatingId(id);
+    setProcessingId(id);
     setErrorMessage("");
 
-    const paidAt =
+    const now =
       new Date().toISOString();
 
     const { error } =
@@ -200,22 +219,25 @@ export default function Home() {
         .from("invoices")
         .update({
           status: "paid",
-          bkash_trxid: cleanedTrx,
-          paid_at: paidAt,
+          paid_at: now,
+          verified_at: now,
+          verified_by: "admin",
+          rejection_reason: null,
         })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("status", "verification");
 
     if (error) {
       console.error(
-        "Payment update error:",
+        "Approve payment error:",
         error
       );
 
       setErrorMessage(
-        "Payment Confirm করা যায়নি। আবার চেষ্টা করুন।"
+        "Payment approve করা যায়নি। আবার চেষ্টা করুন।"
       );
 
-      setUpdatingId(null);
+      setProcessingId(null);
       return;
     }
 
@@ -227,9 +249,10 @@ export default function Home() {
               ? {
                   ...currentInvoice,
                   status: "paid" as const,
-                  bkash_trxid:
-                    cleanedTrx,
-                  paid_at: paidAt,
+                  paid_at: now,
+                  verified_at: now,
+                  verified_by: "admin",
+                  rejection_reason: null,
                 }
               : currentInvoice
         );
@@ -239,7 +262,94 @@ export default function Home() {
       return updatedInvoices;
     });
 
-    setUpdatingId(null);
+    setProcessingId(null);
+  };
+
+  // =========================
+  // REJECT PAYMENT
+  // =========================
+
+  const rejectPayment = async (
+    id: string
+  ) => {
+    const invoice =
+      invoices.find(
+        (item) => item.id === id
+      );
+
+    if (!invoice) {
+      return;
+    }
+
+    if (invoice.status !== "verification") {
+      return;
+    }
+
+    const reason = window.prompt(
+      "Payment reject করার কারণ লিখুন:"
+    );
+
+    const cleanedReason =
+      reason?.trim();
+
+    if (!cleanedReason) {
+      return;
+    }
+
+    setProcessingId(id);
+    setErrorMessage("");
+
+    const { error } =
+      await supabase
+        .from("invoices")
+        .update({
+          status: "pending",
+          rejection_reason:
+            cleanedReason,
+          verified_at:
+            new Date().toISOString(),
+          verified_by: "admin",
+        })
+        .eq("id", id)
+        .eq("status", "verification");
+
+    if (error) {
+      console.error(
+        "Reject payment error:",
+        error
+      );
+
+      setErrorMessage(
+        "Payment reject করা যায়নি। আবার চেষ্টা করুন।"
+      );
+
+      setProcessingId(null);
+      return;
+    }
+
+    setInvoices((currentInvoices) => {
+      const updatedInvoices =
+        currentInvoices.map(
+          (currentInvoice) =>
+            currentInvoice.id === id
+              ? {
+                  ...currentInvoice,
+                  status: "pending" as const,
+                  rejection_reason:
+                    cleanedReason,
+                  verified_at:
+                    new Date().toISOString(),
+                  verified_by: "admin",
+                }
+              : currentInvoice
+        );
+
+      calculateStats(updatedInvoices);
+
+      return updatedInvoices;
+    });
+
+    setProcessingId(null);
   };
 
   return (
@@ -252,7 +362,7 @@ export default function Home() {
         </h1>
 
         {/* Stats */}
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
           <StatsCard
             title="মোট আদায়"
             amount={stats.paid}
@@ -263,6 +373,12 @@ export default function Home() {
             title="বাকি"
             amount={stats.due}
             color="text-red-600"
+          />
+
+          <StatsCard
+            title="Verification"
+            amount={stats.verification}
+            color="text-blue-600"
           />
 
           <StatsCard
@@ -299,13 +415,18 @@ export default function Home() {
                 key={invoice.id}
                 id={invoice.id}
                 month={invoice.month}
-                total_amount={invoice.total_amount}
+                total_amount={
+                  invoice.total_amount
+                }
                 status={invoice.status}
                 reference_code={
                   invoice.reference_code
                 }
                 bkash_trxid={
                   invoice.bkash_trxid
+                }
+                submitted_at={
+                  invoice.submitted_at
                 }
                 tenantName={
                   invoice.leases?.tenants?.name
@@ -316,9 +437,14 @@ export default function Home() {
                 propertyName={
                   invoice.leases?.units?.properties?.name
                 }
-                onPay={markAsPaid}
-                isPaying={
-                  updatingId === invoice.id
+                onApprove={
+                  approvePayment
+                }
+                onReject={
+                  rejectPayment
+                }
+                isProcessing={
+                  processingId === invoice.id
                 }
               />
             ))

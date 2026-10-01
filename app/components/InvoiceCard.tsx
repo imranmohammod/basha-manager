@@ -2,17 +2,19 @@ type Props = {
   id: string;
   month: string;
   total_amount: number | string | null | undefined;
-  status: "pending" | "paid";
+  status: "pending" | "verification" | "paid";
 
   reference_code?: string | null;
   bkash_trxid?: string | null;
+  submitted_at?: string | null;
 
   tenantName?: string;
   unitName?: string;
   propertyName?: string;
 
-  onPay: (id: string) => void;
-  isPaying: boolean;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  isProcessing: boolean;
 };
 
 export default function InvoiceCard({
@@ -22,11 +24,13 @@ export default function InvoiceCard({
   status,
   reference_code,
   bkash_trxid,
+  submitted_at,
   tenantName,
   unitName,
   propertyName,
-  onPay,
-  isPaying,
+  onApprove,
+  onReject,
+  isProcessing,
 }: Props) {
   const numericAmount = Number(total_amount);
 
@@ -74,14 +78,41 @@ export default function InvoiceCard({
 
   const tenant = tenantName ?? "ভাই";
 
-  const waText =
-    status === "pending"
-      ? `আসসালামু আলাইকুম ${tenant}, আপনার ${displayMonth} মাসের ভাড়া ৳${formattedAmount} বাকি। রেফারেন্স: ${reference}। পেমেন্ট করতে এই লিংকে যান: https://basha-manager.vercel.app/pay/${id}`
-      : `আসসালামু আলাইকুম ${tenant}, আপনার ${displayMonth} মাসের ৳${formattedAmount} ভাড়ার পেমেন্ট গ্রহণ করা হয়েছে। রেফারেন্স: ${reference}। ধন্যবাদ।`;
+  const submittedDate = submitted_at
+    ? new Date(submitted_at).toLocaleString("bn-BD")
+    : null;
 
-  const waUrl = `https://wa.me/?text=${encodeURIComponent(
-    waText
-  )}`;
+  // WhatsApp message
+  let waText = "";
+
+  if (status === "pending") {
+    waText =
+      `আসসালামু আলাইকুম ${tenant}, ` +
+      `আপনার ${displayMonth} মাসের ভাড়া ` +
+      `৳${formattedAmount} বাকি। ` +
+      `রেফারেন্স: ${reference}। ` +
+      `পেমেন্ট করতে এই লিংকে যান: ` +
+      `https://basha-manager.vercel.app/pay/${id}`;
+  } else if (status === "verification") {
+    waText =
+      `আসসালামু আলাইকুম ${tenant}, ` +
+      `আপনার ${displayMonth} মাসের ` +
+      `৳${formattedAmount} payment information ` +
+      `আমরা পেয়েছি। ` +
+      `TrxID: ${bkash_trxid ?? "N/A"}। ` +
+      `Payment বর্তমানে verification-এর অপেক্ষায় আছে।`;
+  } else {
+    waText =
+      `আসসালামু আলাইকুম ${tenant}, ` +
+      `আপনার ${displayMonth} মাসের ` +
+      `৳${formattedAmount} ভাড়ার payment ` +
+      `verify করা হয়েছে। ` +
+      `রেফারেন্স: ${reference}। ` +
+      `ধন্যবাদ।`;
+  }
+
+  const waUrl =
+    `https://wa.me/?text=${encodeURIComponent(waText)}`;
 
   return (
     <div className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/5">
@@ -137,17 +168,67 @@ export default function InvoiceCard({
         )}
 
         {/* Status */}
-        <span
-          className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-medium ${
-            status === "paid"
-              ? "bg-green-100 text-green-700"
-              : "bg-yellow-100 text-yellow-700"
-          }`}
-        >
-          {status === "paid"
-            ? "Paid"
-            : "Pending"}
-        </span>
+        {status === "pending" && (
+          <span className="mt-3 inline-block rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">
+            Pending - বাকি
+          </span>
+        )}
+
+        {status === "verification" && (
+          <div className="mt-3 space-y-2">
+            <span className="inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
+              🔍 Verification Pending
+            </span>
+
+            <div className="rounded-xl bg-blue-50 p-3 text-xs text-blue-900">
+              {bkash_trxid && (
+                <p>
+                  TrxID:{" "}
+                  <span className="font-mono font-bold">
+                    {bkash_trxid}
+                  </span>
+                </p>
+              )}
+
+              {submittedDate && (
+                <p className="mt-1">
+                  Submitted: {submittedDate}
+                </p>
+              )}
+            </div>
+
+            {/* Admin verification actions */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onApprove(id)}
+                disabled={isProcessing}
+                className="h-11 rounded-xl bg-green-600 px-3 text-sm font-bold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isProcessing
+                  ? "Processing..."
+                  : "✓ Approve"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onReject(id)}
+                disabled={isProcessing}
+                className="h-11 rounded-xl border border-red-100 bg-red-50 px-3 text-sm font-bold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isProcessing
+                  ? "Processing..."
+                  : "✕ Reject"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {status === "paid" && (
+          <span className="mt-3 inline-block rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+            ✓ Paid
+          </span>
+        )}
       </div>
 
       {/* Actions */}
@@ -162,29 +243,16 @@ export default function InvoiceCard({
           WhatsApp
         </a>
 
-        {/* Payment Link + Paid button */}
+        {/* Payment Link */}
         {status === "pending" && (
-          <>
-            <a
-              href={`/pay/${id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="grid h-10 w-full place-items-center rounded-xl bg-zinc-100 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200"
-            >
-              Payment Link
-            </a>
-
-            <button
-              type="button"
-              disabled={isPaying}
-              onClick={() => onPay(id)}
-              className="h-10 w-full rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isPaying
-                ? "Wait..."
-                : "Paid করো"}
-            </button>
-          </>
+          <a
+            href={`/pay/${id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="grid h-10 w-full place-items-center rounded-xl bg-zinc-100 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200"
+          >
+            Payment Link
+          </a>
         )}
       </div>
     </div>
