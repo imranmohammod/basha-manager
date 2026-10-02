@@ -55,6 +55,8 @@ type Invoice = {
 export default function PayPage() {
   const params = useParams();
 
+  const BKASH_NUMBER = process.env.NEXT_PUBLIC_BKASH_NUMBER || "{BKASH_NUMBER}";
+
   const id =
     typeof params.id === "string"
       ? params.id
