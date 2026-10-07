@@ -403,76 +403,140 @@ export default function Home() {
     window.open(`/pay/${payId}`, "_blank", "noopener,noreferrer");
   };
 
+  // =========================
+  // GROUPED VIEW - Same Table View
+  // =========================
+  const verificationInvoices = invoices.filter(
+    (i) => i.status === "verification",
+  );
+  const pendingInvoices = invoices.filter((i) => i.status === "pending");
+  const paidInvoices = invoices.filter((i) => i.status === "paid");
+
   return (
     <main className="min-h-screen bg-gray-50 p-4">
       <div className="mx-auto max-w-4xl">
-        {/* Header */}
         <h1 className="mb-6 text-2xl font-bold">🏠 Basha Manager</h1>
 
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatsCard
             title="মোট আদায়"
             amount={stats.paid}
             color="text-green-600"
           />
-
           <StatsCard title="বাকি" amount={stats.due} color="text-red-600" />
-
+          <StatsCard
+            title="মোট বিল"
+            amount={stats.total}
+            color="text-gray-900"
+          />
           <StatsCard
             title="Verification"
             amount={stats.verification}
             color="text-blue-600"
             showCurrency={false}
           />
-
-          <StatsCard
-            title="মোট বিল"
-            amount={stats.total}
-            color="text-gray-900"
-          />
         </div>
 
-        {/* Error */}
         {errorMessage && (
           <div className="mb-4 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
             {errorMessage}
           </div>
         )}
 
-        {/* Invoice List */}
-        <div className="space-y-3">
-          {loading ? (
-            <div className="rounded-xl bg-white p-6 text-center shadow">
-              <p className="text-gray-500">Invoice loading হচ্ছে...</p>
+        {loading ? (
+          <div className="rounded-xl bg-white p-6 text-center shadow">
+            <p className="text-gray-500">Invoice loading হচ্ছে...</p>
+          </div>
+        ) : (
+          <>
+            {verificationInvoices.length > 0 && (
+              <div className="mb-8">
+                <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-blue-700">
+                  🔵 Payment Verification{" "}
+                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-sm">
+                    {verificationInvoices.length}
+                  </span>
+                </h2>
+                <div className="space-y-3">
+                  {verificationInvoices.map((invoice) => (
+                    <InvoiceCard
+                      key={invoice.id}
+                      id={invoice.id}
+                      month={invoice.month}
+                      total_amount={invoice.total_amount}
+                      status={invoice.status}
+                      reference_code={invoice.reference_code}
+                      bkash_trxid={invoice.bkash_trxid}
+                      submitted_at={invoice.submitted_at}
+                      tenantName={invoice.leases?.tenants?.name}
+                      unitName={invoice.leases?.units?.unit_name}
+                      propertyName={invoice.leases?.units?.properties?.name}
+                      onApprove={approvePayment}
+                      onReject={rejectPayment}
+                      isProcessing={processingId === invoice.id}
+                      onPay={() => handlePay(invoice)}
+                      isPaying={processingId === invoice.id}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h2 className="mb-3 text-lg font-bold">All Invoices</h2>
+              <div className="space-y-3">
+                {invoices.length === 0 ? (
+                  <div className="rounded-xl bg-white p-6 text-center shadow">
+                    <p className="text-gray-500">কোনো invoice পাওয়া যায়নি।</p>
+                  </div>
+                ) : (
+                  <>
+                    {pendingInvoices.map((invoice) => (
+                      <InvoiceCard
+                        key={invoice.id}
+                        id={invoice.id}
+                        month={invoice.month}
+                        total_amount={invoice.total_amount}
+                        status={invoice.status}
+                        reference_code={invoice.reference_code}
+                        bkash_trxid={invoice.bkash_trxid}
+                        submitted_at={invoice.submitted_at}
+                        tenantName={invoice.leases?.tenants?.name}
+                        unitName={invoice.leases?.units?.unit_name}
+                        propertyName={invoice.leases?.units?.properties?.name}
+                        onApprove={approvePayment}
+                        onReject={rejectPayment}
+                        isProcessing={processingId === invoice.id}
+                        onPay={() => handlePay(invoice)}
+                        isPaying={processingId === invoice.id}
+                      />
+                    ))}
+                    {paidInvoices.map((invoice) => (
+                      <InvoiceCard
+                        key={invoice.id}
+                        id={invoice.id}
+                        month={invoice.month}
+                        total_amount={invoice.total_amount}
+                        status={invoice.status}
+                        reference_code={invoice.reference_code}
+                        bkash_trxid={invoice.bkash_trxid}
+                        submitted_at={invoice.submitted_at}
+                        tenantName={invoice.leases?.tenants?.name}
+                        unitName={invoice.leases?.units?.unit_name}
+                        propertyName={invoice.leases?.units?.properties?.name}
+                        onApprove={approvePayment}
+                        onReject={rejectPayment}
+                        isProcessing={processingId === invoice.id}
+                        onPay={() => handlePay(invoice)}
+                        isPaying={processingId === invoice.id}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
             </div>
-          ) : invoices.length === 0 ? (
-            <div className="rounded-xl bg-white p-6 text-center shadow">
-              <p className="text-gray-500">কোনো invoice পাওয়া যায়নি।</p>
-            </div>
-          ) : (
-            invoices.map((invoice) => (
-              <InvoiceCard
-                key={invoice.id}
-                id={invoice.id}
-                month={invoice.month}
-                total_amount={invoice.total_amount}
-                status={invoice.status}
-                reference_code={invoice.reference_code}
-                bkash_trxid={invoice.bkash_trxid}
-                submitted_at={invoice.submitted_at}
-                tenantName={invoice.leases?.tenants?.name}
-                unitName={invoice.leases?.units?.unit_name}
-                propertyName={invoice.leases?.units?.properties?.name}
-                onApprove={approvePayment}
-                onReject={rejectPayment}
-                isProcessing={processingId === invoice.id}
-                onPay={() => handlePay(invoice)}
-                isPaying={processingId === invoice.id}
-              />
-            ))
-          )}
-        </div>
+          </>
+        )}
       </div>
     </main>
   );
