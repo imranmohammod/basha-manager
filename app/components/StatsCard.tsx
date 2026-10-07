@@ -1,29 +1,23 @@
-
 type Props = {
   title: string;
-  amount: number | string | null | undefined;
+  amount: number;
   color: string;
+  showCurrency?: boolean;
 };
 
 export default function StatsCard({
   title,
   amount,
   color,
+  showCurrency = true,
 }: Props) {
-  const numericAmount = Number(amount);
-
-  const safeAmount = Number.isFinite(numericAmount)
-    ? numericAmount
-    : 0;
-
   return (
     <div className="rounded-xl bg-white p-4 shadow">
-      <p className="text-sm text-gray-500">
-        {title}
-      </p>
+      <p className="text-sm text-gray-500">{title}</p>
 
       <p className={`text-xl font-bold ${color}`}>
-        {safeAmount.toLocaleString("bn-BD")} ৳
+        {Number(amount || 0).toLocaleString("bn-BD")}
+        {showCurrency && " ৳"}
       </p>
     </div>
   );
