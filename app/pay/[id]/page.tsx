@@ -123,7 +123,7 @@ export default function PayPage() {
               )
             `
           )
-          .eq("id", id)
+          .or(`id.eq.${id},reference_code.eq.${id}`)
           .maybeSingle();
 
       if (error || !data) {
