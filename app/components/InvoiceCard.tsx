@@ -15,6 +15,8 @@ type Props = {
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   isProcessing: boolean;
+  onPay: () => void;
+  isPaying: boolean;
 };
 
 export default function InvoiceCard({
@@ -31,22 +33,19 @@ export default function InvoiceCard({
   onApprove,
   onReject,
   isProcessing,
+  onPay,
+  isPaying,
 }: Props) {
   const numericAmount = Number(total_amount);
 
-  const safeAmount = Number.isFinite(numericAmount)
-    ? numericAmount
-    : 0;
+  const safeAmount = Number.isFinite(numericAmount) ? numericAmount : 0;
 
-  const formattedAmount =
-    safeAmount.toLocaleString("bn-BD");
+  const formattedAmount = safeAmount.toLocaleString("bn-BD");
 
   const reference =
-    reference_code ??
-    `INV-${id
-      .replace(/-/g, "")
-      .slice(0, 8)
-      .toUpperCase()}`;
+    reference_code ?? `INV-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+
+  const payId = reference_code || id;
 
   const formatMonth = (value: string) => {
     const match = value.match(/^(\d{4})-(\d{2})$/);
@@ -62,11 +61,7 @@ export default function InvoiceCard({
       return value;
     }
 
-    const date = new Date(
-      Number(year),
-      monthIndex - 1,
-      1
-    );
+    const date = new Date(Number(year), monthIndex - 1, 1);
 
     return date.toLocaleDateString("en-US", {
       month: "long",
@@ -92,7 +87,7 @@ export default function InvoiceCard({
       `৳${formattedAmount} বাকি। ` +
       `রেফারেন্স: ${reference}। ` +
       `পেমেন্ট করতে এই লিংকে যান: ` +
-      `https://basha-manager.vercel.app/pay/${id}`;
+      `https://basha-manager.vercel.app/pay/${payId}`;
   } else if (status === "verification") {
     waText =
       `আসসালামু আলাইকুম ${tenant}, ` +
@@ -111,8 +106,7 @@ export default function InvoiceCard({
       `ধন্যবাদ।`;
   }
 
-  const waUrl =
-    `https://wa.me/?text=${encodeURIComponent(waText)}`;
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(waText)}`;
 
   return (
     <div className="flex flex-col gap-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/5">
@@ -120,13 +114,9 @@ export default function InvoiceCard({
       <div className="min-w-0">
         {/* Tenant + Unit */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <p className="font-bold text-zinc-900">
-            {tenantName ?? "Unknown"}
-          </p>
+          <p className="font-bold text-zinc-900">{tenantName ?? "Unknown"}</p>
 
-          <span className="text-zinc-300">
-            •
-          </span>
+          <span className="text-zinc-300">•</span>
 
           <p className="text-sm font-medium text-zinc-700">
             {unitName ?? "Unit"}
@@ -184,16 +174,12 @@ export default function InvoiceCard({
               {bkash_trxid && (
                 <p>
                   TrxID:{" "}
-                  <span className="font-mono font-bold">
-                    {bkash_trxid}
-                  </span>
+                  <span className="font-mono font-bold">{bkash_trxid}</span>
                 </p>
               )}
 
               {submittedDate && (
-                <p className="mt-1">
-                  Submitted: {submittedDate}
-                </p>
+                <p className="mt-1">Submitted: {submittedDate}</p>
               )}
             </div>
 
@@ -205,9 +191,7 @@ export default function InvoiceCard({
                 disabled={isProcessing}
                 className="h-11 rounded-xl bg-green-600 px-3 text-sm font-bold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isProcessing
-                  ? "Processing..."
-                  : "✓ Approve"}
+                {isProcessing ? "Processing..." : "✓ Approve"}
               </button>
 
               <button
@@ -216,9 +200,7 @@ export default function InvoiceCard({
                 disabled={isProcessing}
                 className="h-11 rounded-xl border border-red-100 bg-red-50 px-3 text-sm font-bold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isProcessing
-                  ? "Processing..."
-                  : "✕ Reject"}
+                {isProcessing ? "Processing..." : "✕ Reject"}
               </button>
             </div>
           </div>
@@ -245,14 +227,14 @@ export default function InvoiceCard({
 
         {/* Payment Link */}
         {status === "pending" && (
-          <a
-            href={`/pay/${id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="grid h-10 w-full place-items-center rounded-xl bg-zinc-100 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200"
+          <button
+            type="button"
+            onClick={onPay}
+            disabled={isPaying}
+            className="grid h-10 w-full place-items-center rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Payment Link
-          </a>
+            {isPaying ? "Opening..." : `Pay - ${reference}`}
+          </button>
         )}
       </div>
     </div>
